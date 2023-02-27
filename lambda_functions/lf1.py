@@ -1,5 +1,8 @@
+import datetime
 import json
 import boto3
+
+
 
 
 def lambda_handler(event, context):
@@ -9,20 +12,70 @@ def lambda_handler(event, context):
    bot = event['bot']['name']
    slots = event['sessionState']['intent']['slots']
    intent = event['sessionState']['intent']['name']
-   response = {
-       "sessionState":{
-           "dialogAction":{
-               "type": "Delegate"
-           },
-           "intent":{
-               'name': intent,
-               'slots': slots
+  
+   if event['invocationSource'] == 'DialogCodeHook':
+       if slots['NumberOfPeople'] != None:
+           if int(slots['NumberOfPeople']['value']['interpretedValue']) < 0:
+               response = {
+                   "sessionState":{
+                       "dialogAction":{
+                           "slotToElicit":'NumberOfPeople',
+                           "type": "ElicitSlot"
+                          
+                       },
+                       "intent":{
+                           'name': intent,
+                           'slots': slots
+                          
+                       }
+                      
+                   },
+                   "messages": [
+                       {
+                           "contentType": "PlainText",
+                           "content": "Please enter a valid number."
+                          
+                       }
+                       ]
+                  
+               }
+           else:
+               response = {
+                   "sessionState":{
+                       "dialogAction":{
+                           "type": "Delegate"
+                          
+                       },
+                       "intent":{
+                           'name': intent,
+                           'slots': slots
+                          
+                       }
+                      
+                   }
+                  
+               }
+       else:
+           response = {
+               "sessionState":{
+                   "dialogAction":{
+                       "type": "Delegate"
+                      
+                   },
+                   "intent":{
+                       'name': intent,
+                       'slots': slots
+                      
+                   }
+                  
+               }
+              
            }
-       }
-   }
+  
 
 
    if event['invocationSource'] == 'FulfillmentCodeHook':
+      
        client = boto3.client("sqs")
        response = {
            "sessionState": {
@@ -60,5 +113,3 @@ def lambda_handler(event, context):
 
 
    return response
-
-

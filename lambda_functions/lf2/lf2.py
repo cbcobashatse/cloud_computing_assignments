@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import time
 
 import boto3
 from opensearchpy import OpenSearch, RequestsHttpConnection
@@ -131,21 +132,46 @@ def lookup_data(key, db=None, table='yelp-restaurants'):
 
 def send_message_user(email, response_to_user):
     client_sns = boto3.client('sns')
-    
     topic_arn = 'arn:aws:sns:us-east-1:064833673922:restaurants'
-    print(topic_arn)
+
+    # get the list of subscribers
+    subscribers = client_sns.list_subscriptions()['Subscriptions']
+    subscribers_list = []
+    for subscriber in subscribers:
+        subscribers_list.append(subscriber['Endpoint'])
     
-    subscription_arn = client_sns.subscribe(
-        TopicArn=topic_arn,
-        Protocol='email',
-        Endpoint=email,
-        Attributes={
-            'FilterPolicy': json.dumps({'email': [email]})
-        },
-        ReturnSubscriptionArn=True
-    )
-    print("subscribed: ", subscription_arn['SubscriptionArn'])
-    
+    # subscribe a new user
+    if email not in subscribers_list:
+        print(">>>subscribing a new user")
+        subscription = client_sns.subscribe(
+            TopicArn=topic_arn,
+            Protocol='email',
+            Endpoint=email,
+            Attributes={
+                'FilterPolicy': json.dumps({'email': [email]})
+            },
+            ReturnSubscriptionArn=True
+        )
+        subscription_arn = subscription['SubscriptionArn']
+        response = client_sns.get_subscription_attributes(
+            SubscriptionArn=subscription_arn
+        )
+        pending_confirmation = response['Attributes']['PendingConfirmation']
+        
+        print(">>>waiting for the user to confirm subscription")
+        count = 0
+        while pending_confirmation == 'true':
+            if count > 120:
+                print(">>>user failed to confirm")
+                return
+            time.sleep(1)
+            count += 1
+            response = client_sns.get_subscription_attributes(
+                SubscriptionArn=subscription_arn
+            )
+            pending_confirmation = response['Attributes']['PendingConfirmation']
+
+    print(">>>sending email to the user")
     response = client_sns.publish(
         TopicArn=topic_arn,
         Message=response_to_user,
@@ -157,5 +183,4 @@ def send_message_user(email, response_to_user):
             }
         },
     )
-    print('email sent: ', response)
-    
+    # print('email sent: ', response)
