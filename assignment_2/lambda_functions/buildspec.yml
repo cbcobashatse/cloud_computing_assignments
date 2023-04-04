@@ -1,0 +1,29 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.9
+  pre_build:
+    commands:
+  build:
+    commands:
+      - echo "Building the artifacts..."
+      - cd index-photos
+      - zip -r ../index-function.zip .
+      - cd ../search-photos
+      - zip -r ../search-function.zip .
+      - cd ../
+      - echo "Building Source 2 using the artifact from Source 1..."
+  post_build:
+    commands:
+      - echo "Uploading artifacts to S3..."
+      - aws s3api put-object --bucket ccbd-a2-lambda-artifactsv1 --key artifacts/ --content-type "application/x-directory"
+      - aws s3 cp ./index-function.zip s3://ccbd-a2-lambda-artifactsv1/artifacts/
+      - aws s3 cp ./search-function.zip s3://ccbd-a2-lambda-artifactsv1/artifacts/
+      - aws lambda update-function-code --function-name index-photos --region us-east-1 --zip-file fileb://index-function.zip
+      - aws lambda update-function-code --function-name search-photos --region us-east-1 --zip-file fileb://search-function.zip
+artifacts:
+  files:
+    - index-function.zip
+    - search-function.zip

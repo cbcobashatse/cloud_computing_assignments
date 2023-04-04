@@ -1,0 +1,28 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+    commands:
+      - echo "Installing dependencies"
+      - npm install
+  pre_build:
+    commands:
+      - echo "Removing old build artifacts"
+      - rm -rf build/*
+  build:
+    commands:
+      - echo "Building React app"
+      - npm run build
+  post_build:
+    commands:
+      - echo "Uploading build to S3"
+      - aws s3 rm s3://b1-clientbucketv1/ --recursive
+      - aws s3 sync ./build/ s3://b1-clientbucketv1/
+      - echo "Build deployed successfully"
+
+artifacts:
+  files:
+    - '**/*'
+#   base-directory: 'build/'

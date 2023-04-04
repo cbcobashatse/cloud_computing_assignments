@@ -1,0 +1,616 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Photo album web application
+
+Resources:
+  MyOpenSearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: photos
+      EngineVersion: 'OpenSearch_1.0'
+      ClusterConfig:
+        DedicatedMasterEnabled: true
+        InstanceCount: '2'
+        ZoneAwarenessEnabled: true
+        InstanceType: 't3.small.search'
+        DedicatedMasterType: 't3.small.search'
+        DedicatedMasterCount: '3'
+      EBSOptions:
+        EBSEnabled: true
+        VolumeType: gp2
+        VolumeSize: 10
+      AccessPolicies:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: 'es:*'
+            Resource: arn:aws:es:*:*:domain/*
+      AdvancedSecurityOptions:
+        Enabled: true
+        InternalUserDatabaseEnabled: true
+        MasterUserOptions:
+          MasterUserName: "yvan_feneyant"
+          MasterUserPassword: "Gatete@chris1"
+      NodeToNodeEncryptionOptions:
+        Enabled: true
+      DomainEndpointOptions:
+        EnforceHTTPS: true
+      EncryptionAtRestOptions:
+        Enabled: true
+
+  AIPhotoSearchApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: AI Photo Search
+      Description: AI Photo Search application.
+      Body:
+        swagger: '2.0'
+        info:
+          title: AI Photo Search
+          description: 'AI Photo Search application, built during the Cloud and Big Data course at Columbia University.'
+          version: 1.0.0
+        schemes:
+          - https
+        basePath: /v1
+        produces:
+          - application/json
+        x-amazon-apigateway-binary-media-types:
+          - "image/png"
+          - "image/jpeg"
+          - "image/jpg"
+        paths:
+          /search:
+            get:
+              summary: photo search method
+              description: |
+                This API takes in a search query as a query parameter and returns zero or more photos that match the search query.
+              operationId: searchPhotos
+              parameters:
+                - in: query
+                  name: q
+                  schema:
+                    type: string
+                  description: the string to be searched
+                - in: header
+                  name: x-api-key
+                  required: true
+                  schema:
+                    type: string
+
+              produces:
+                - application/json
+              responses:
+                '200':
+                  description: search results
+                  schema:
+                    $ref: '#/definitions/SearchResponse'
+                '403':
+                  description: Unauthorized
+                  schema:
+                    $ref: '#/definitions/Error'
+                '500':
+                  description: Unexpected error
+                  schema:
+                    $ref: '#/definitions/Error'
+              x-amazon-apigateway-integration:
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SearchPhotosFunction.Arn}/invocations
+                httpMethod: POST
+                type: AWS_PROXY
+                credentials: !GetAtt LambdageneralExecutionRole.Arn
+                requestParameters:
+                  integration.request.header.x-api-key: method.request.header.x-api-key
+                contentHandling: CONVERT_TO_BINARY
+                x-amazon-apigateway-api-key-source: HEADER
+
+            options:
+              summary: CORS support
+              description: Enable CORS by returning correct headers
+              operationId: optionsSearch
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              responses:
+                '200':
+                  description: Default response for OPTIONS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: string
+                    Access-Control-Allow-Methods:
+                      type: string
+                    Access-Control-Allow-Origin:
+                      type: string
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                      method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                type: mock
+          /upload/{filename}:
+            put:
+              summary: photo upload method
+              description: |
+                This API takes in the multi-part body sent to it (ex. a photo) and uploads it to an S3 bucket.
+              operationId: uploadPhoto
+              consumes:
+                - image/png
+                - image/jpg
+                - image/jpeg
+              produces:
+                - application/json
+              parameters:
+                - in: path
+                  name: filename
+                  required: true
+                  schema:
+                    type: string
+                  description: the filename of the uploaded image
+                - in: header
+                  name: Content-Type
+                  schema:
+                    type: string
+                - in: header
+                  name: Content-Length
+                  schema:
+                    type: integer
+                - in: header
+                  name: x-amz-meta-customLabels
+                  schema:
+                    type: string
+                  description: Custom labels for the uploaded image
+                - in: header
+                  name: x-api-key
+                  required: true
+                  schema:
+                    type: string
+
+              x-amazon-apigateway-integration:
+                type: aws
+                httpMethod: PUT
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:s3:path/${ClientBucket}/{filename}
+                credentials: !GetAtt ApiGatewayToS3Role.Arn
+                requestParameters:
+                  integration.request.path.filename: method.request.path.filename
+                  integration.request.header.Content-Type: method.request.header.Content-Type
+                  integration.request.header.Content-Length: method.request.header.Content-Length
+                  integration.request.header.x-amz-meta-customLabels: method.request.header.x-amz-meta-customLabels
+                  integration.request.header.x-api-key: method.request.header.x-api-key
+                x-amazon-apigateway-api-key-source: HEADER
+              responses:
+                '200':
+                statusCode: '200'
+                responseParameters:
+                  method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,x-amz-meta-customLabels'"
+                  method.response.header.Access-Control-Allow-Methods: "'PUT,OPTIONS'"
+                  method.response.header.Access-Control-Allow-Origin: "'*'"
+                responseTemplates:
+                  application/json: |
+                    {
+                      "message" : "Image uploaded successfully",
+                      "location" : "$input.params('Location')"
+                    }
+              '4\\d{2}':
+                statusCode: '403'
+                responseTemplates:
+                  application/json: "{\"message\": \"Unauthorized\"}"
+              '5\\d{2}':
+                statusCode: '500'
+                responseTemplates:
+                  application/json: "{\"message\": \"Unexpected error\"}"
+
+                  
+              responses:
+                '200':
+                  description: S3 PUT operation response
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: string
+                    Access-Control-Allow-Methods:
+                      type: string
+                    Access-Control-Allow-Origin:
+                      type: string
+                  schema:
+                    type: object
+                '403':
+                  description: Unauthorized
+                  schema:
+                    $ref: '#/definitions/Error'
+                '500':
+                  description: Unexpected error
+                  schema:
+                    $ref: '#/definitions/Error'
+            options:
+              summary: CORS support
+              description: Enable CORS by returning correct headers
+              operationId: optionsUpload
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              responses:
+                '200':
+                  description: Default response for OPTIONS method
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: string
+                    Access-Control-Allow-Methods:
+                      type: string
+                    Access-Control-Allow-Origin:
+                      type: string
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: '200'
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,x-amz-meta-customLabels'"
+                      method.response.header.Access-Control-Allow-Methods: "'PUT,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                type: mock
+        definitions:
+          SearchResponse:
+            type: object
+            properties:
+              results:
+                type: array
+                items:
+                  $ref: '#/definitions/Photo'
+          Photo:
+            type: object
+            properties:
+              url:
+                type: string
+              labels:
+                type: array
+                items:
+                  type: string
+          Error:
+            type: object
+            properties:
+              code:
+                type: integer
+                format: int32
+              message:
+                type: string
+
+  AIPhotoSearchApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: AIPhotoSearchApi
+    Properties:
+      RestApiId: !Ref AIPhotoSearchApi
+      Description: Deploying the API to a stage
+    
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          default: [UpdateDeployment]
+        UpdateDeployment: {}
+    
+  AIPhotoSearchApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: prod 
+      RestApiId: !Ref AIPhotoSearchApi
+      DeploymentId: !Ref AIPhotoSearchApiDeployment
+      Description: Production stage for the AI Photo Search API
+
+  ApiGatewayToS3Role:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "apigateway.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "S3Policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:PutObject"
+                Resource: 
+                  - !Sub 'arn:aws:s3:::${ClientBucket}'
+                  - !Sub 'arn:aws:s3:::${ClientBucket}/*'
+        - PolicyName: "logPolicyforAPI"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:DescribeLogGroups"
+                  - "logs:DescribeLogStreams"
+                  - "logs:PutLogEvents"
+                  - "logs:GetLogEvents"
+                  - "logs:FilterLogEvents"
+                Resource: "*"
+
+  AIPhotoSearchApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: AIPhotoSearchApiKey
+      Description: API Key for AI Photo Search
+      Enabled: true
+
+  AIPhotoSearchUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      Description: Usage plan for AI Photo Search
+      ApiStages:
+        - ApiId: !Ref AIPhotoSearchApi
+          Stage: prod
+
+  AIPhotoSearchApiKeyUsagePlanAssociation:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref AIPhotoSearchApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref AIPhotoSearchUsagePlan
+
+  LambdageneralExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - apigateway.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Path: /
+      Policies:
+        - PolicyName: "MyS3BucketPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:*"
+                  - "s3-object-lambda:*"
+                Resource: "*"
+        - PolicyName: lambda-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: '*'
+
+  IndexPhotosFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              print(event)
+      FunctionName: index-photos
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdageneralExecutionRole.Arn
+      Runtime: python3.9
+    
+  SearchPhotosFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              print(event)
+      FunctionName: search-photos
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdageneralExecutionRole.Arn
+      Runtime: python3.9
+    
+  ClientBucketEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:invokeFunction
+      SourceAccount: !Ref 'AWS::AccountId'
+      FunctionName: !Ref 'IndexPhotosFunction'
+      SourceArn: !GetAtt
+        - ClientBucket
+        - Arn
+      Principal: s3.amazonaws.com
+
+  ClientBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: IndexPhotosFunction
+    Properties:
+      AccessControl: PublicRead
+      BucketName: b2-clientbucket
+
+  B1ClientBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: PublicRead
+      BucketName: b1-clientbucketv1
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+  B1BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref B1ClientBucket
+      PolicyDocument:
+        Id: PublicWebsitePolicy
+        Version: 2012-10-17
+        Statement:
+          - Sid: PublicReadForGetBucketObjects
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref B1ClientBucket
+                - /*
+  LambdaArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: PublicRead
+      BucketName: ccbd-a2-lambda-artifactsv1
+    
+  LambdaArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LambdaArtifactsBucket
+      PolicyDocument:
+        Id: PublicReadForGetBucketObjects
+        Version: 2012-10-17
+        Statement:
+          - Sid: PublicReadForGetBucketObjects
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref LambdaArtifactsBucket
+                - /* 
+
+
+  ApplyNotificationFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Path: /
+      Policies:
+        - PolicyName: S3BucketNotificationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowBucketNotification
+                Effect: Allow
+                Action: s3:PutBucketNotification
+                Resource:
+                  - !Sub 'arn:aws:s3:::${ClientBucket}'
+                  - !Sub 'arn:aws:s3:::${ClientBucket}/*'
+
+  ApplyBucketNotificationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Runtime: python3.9
+      Role: !GetAtt 'ApplyNotificationFunctionRole.Arn'
+      Timeout: 220
+      Code:
+        ZipFile: |
+          import boto3
+          import logging
+          import json
+          import cfnresponse
+
+          s3Client = boto3.client('s3')
+          logger = logging.getLogger()
+          logger.setLevel(logging.DEBUG)
+
+          def addBucketNotification(bucketName, notificationId, functionArn):
+            notificationResponse = s3Client.put_bucket_notification_configuration(
+              Bucket=bucketName,
+              NotificationConfiguration={
+                'LambdaFunctionConfigurations': [
+                  {
+                    'Id': notificationId,
+                    'LambdaFunctionArn': functionArn,
+                    'Events': [
+                      's3:ObjectCreated:Put'
+                    ]
+                  },
+                ]
+              }
+            )
+            return notificationResponse
+
+          def create(properties, physical_id):
+            bucketName = properties['S3Bucket']
+            notificationId = properties['NotificationId']
+            functionArn = properties['FunctionARN']
+            response = addBucketNotification(bucketName, notificationId, functionArn)
+            logger.info('AddBucketNotification response: %s' % json.dumps(response))
+            return cfnresponse.SUCCESS, physical_id
+
+          def update(properties, physical_id):
+            return cfnresponse.SUCCESS, None
+
+          def delete(properties, physical_id):
+            return cfnresponse.SUCCESS, None
+
+          def handler(event, context):
+            logger.info('Received event: %s' % json.dumps(event))
+
+            status = cfnresponse.FAILED
+            new_physical_id = None
+
+            try:
+              properties = event.get('ResourceProperties')
+              physical_id = event.get('PhysicalResourceId')
+
+              status, new_physical_id = {
+                'Create': create,
+                'Update': update,
+                'Delete': delete
+              }.get(event['RequestType'], lambda x, y: (cfnresponse.FAILED, None))(properties, physical_id)
+            except Exception as e:
+              logger.error('Exception: %s' % e)
+              status = cfnresponse.FAILED
+            finally:
+              cfnresponse.send(event, context, status, {}, new_physical_id)
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ClientBucket
+      PolicyDocument:
+        Id: PublicWebsitePolicy
+        Version: 2012-10-17
+        Statement:
+          - Sid: PublicReadForGetBucketObjects
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref ClientBucket
+                - /* 
+    
+  ApplyNotification:
+    Type: Custom::ApplyNotification
+    Properties:
+      ServiceToken: !GetAtt 'ApplyBucketNotificationFunction.Arn'
+      S3Bucket: !Ref 'ClientBucket'
+      FunctionARN: !GetAtt 'IndexPhotosFunction.Arn'
+      NotificationId: S3ObjectCreatedEvent
+
+Outputs:
+  B1ClientBucketWebsiteURL:
+    Description: The URL of the b1-clientbucket website
+    Value: !Join ['', ['http://', !Ref B1ClientBucket, '.s3-website-', !Ref 'AWS::Region', '.amazonaws.com']]
+
+      
+
+
