@@ -10,11 +10,15 @@
 #### S3 Frontend URL
 http://dining-concierge-assistant-cc4536.s3-website-us-east-1.amazonaws.com/
 
-[Submission Files](https://github.com/cbcobashatse/cloud_computing_assignments/tree/main/assignment_1)
+#### Submission Files
+
+[Find them here!](https://github.com/cbcobashatse/cloud_computing_assignments/tree/main/assignment_1)
 
 ### Assignment 2
 
 #### S3 Frontend URL
 http://b1-clientbucketv1.s3-website-us-east-1.amazonaws.com/
 
-[Submission Files](https://github.com/cbcobashatse/cloud_computing_assignments/tree/main/assignment_2)
+#### Submission Files
+
+[Find them here!](https://github.com/cbcobashatse/cloud_computing_assignments/tree/main/assignment_2)
