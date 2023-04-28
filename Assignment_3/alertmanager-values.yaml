@@ -1,0 +1,11 @@
+config:
+  receivers:
+  - name: 'slack-notifications'
+    slack_configs:
+    - api_url: 'https://hooks.slack.com/services/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' 
+      channel: '#cloud-computing-assignment-3' 
+  route:
+    routes:
+    - match:
+        severity: critical
+      receiver: 'slack-notifications'

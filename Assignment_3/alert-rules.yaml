@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: custom-rules
+spec:
+  groups:
+  - name: custom-rules
+    rules:
+    - alert: InsufficientPods
+      expr: kube_replicationcontroller_status_replicas_available{namespace="default", replicationcontroller="flask-app-replication-controller"} < 3
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Insufficient number of pods for {{ $labels.replicationcontroller }}"
+        description: "{{ $labels.replicationcontroller }} in namespace {{ $labels.namespace }} has less than 3 available pods for more than 1 minute."
